@@ -31,11 +31,11 @@ The program calculates the following metrics using the best bid and best ask:
 
 The calculations were tested using three cases:
 
-| Case      | Bid Size | Ask Size |      Mid | Microprice |     OBI |
-| --------- | -------: | -------: | -------: | ---------: | ------: |
-| Balanced  |      500 |      500 | 100.0100 |   100.0100 |  0.0000 |
-| Bid-heavy |      900 |      100 | 100.0100 |   100.0180 |  0.8000 |
-| Ask-heavy |      100 |      900 | 100.0100 |   100.0020 | -0.8000 |
+| Case      | Bid Size | Ask Size |      Mid | Spread | Microprice |     OBI |
+| --------- | -------: | -------: | -------: | -----: | ---------: | ------: |
+| Balanced  |      500 |      500 | 100.0100 | 0.0200 |   100.0100 |  0.0000 |
+| Bid-heavy |      900 |      100 | 100.0100 | 0.0200 |   100.0180 |  0.8000 |
+| Ask-heavy |      100 |      900 | 100.0100 | 0.0200 |   100.0020 | -0.8000 |
 
 In the balanced case, the microprice equals the mid-price and OBI equals zero. In the bid-heavy case, the microprice moves toward the ask price. In the ask-heavy case, it moves toward the bid price.
 
