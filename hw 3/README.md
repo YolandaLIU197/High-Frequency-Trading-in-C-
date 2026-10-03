@@ -2,23 +2,23 @@
 
 ## Environment
 
-- Machine: MacBook Pro with Apple M1
-- Memory: 8 GB RAM
-- OS: macOS 26.5.1
-- Language: C++17
-- Compiler: clang++
+- MacBook Pro, Apple M1
+- 8 GB RAM
+- macOS 26.5.1
+- C++17
+- clang++
 - Correctness / leak build: `-O0 -g`
 - Benchmark build: `-O2`
 
 ## Build
 
-For correctness and leak testing:
+For leak testing:
 
 ```bash
 clang++ -std=c++17 -O0 -g hw3.cpp -o hw3_check
 ```
 
-For benchmark measurements:
+For benchmark testing:
 
 ```bash
 clang++ -std=c++17 -O2 -Wall -Wextra hw3.cpp -o hw3
@@ -27,62 +27,57 @@ clang++ -std=c++17 -O2 -Wall -Wextra hw3.cpp -o hw3
 
 ## Raw Allocation and RAII
 
-`handle_raw` allocates an `Order` with `new`. If the risk check fails, the function returns before reaching `delete`, so the allocated object is leaked.
+I first used a raw pointer in `handle_raw`. If the function returns early, the allocated `Order` is not deleted.
 
-On macOS, I tested the raw version with:
+I checked it on macOS with:
 
 ```bash
 leaks --atExit -- ./hw3_check raw
 ```
 
-The result was:
+Result:
 
 ```text
 1 leak for 32 total leaked bytes
 ROOT LEAK: <malloc in handle_raw(double)>
 ```
 
-I then rewrote the same logic in two ways:
-
-1. Using `std::unique_ptr`
-2. Using a custom RAII owner whose destructor deletes the owned `Order`
-
-I tested the fixed versions with:
+I then rewrote it with `std::unique_ptr` and also with a custom RAII guard.
 
 ```bash
 leaks --atExit -- ./hw3_check fixed
 ```
 
-The result was:
+Result:
 
 ```text
 0 leaks for 0 total leaked bytes
 ```
 
-Both RAII versions release the owned object automatically when the scope exits, including the early-return path.
+Both versions cleaned up the object automatically even when the function returned early.
 
 ## Rule of Three
 
-`DynamicBuffer` owns a dynamically allocated `double[]` using raw `new[]` and `delete[]`.
+I created `DynamicBuffer` using raw `new[]` and `delete[]`.
 
-The class implements:
+I implemented:
 
-- a destructor
-- a copy constructor
-- a copy-assignment operator
+- destructor
+- copy constructor
+- copy assignment
 
-Both copy operations perform deep copies, so two `DynamicBuffer` objects do not share the same underlying array.
+The copy constructor and assignment both make deep copies.
 
-The test produced:
+Result:
 
 ```text
 DynamicBuffer deep copy: 101.5, 999
 DynamicBuffer vector size: 2
 ```
 
-Changing the copied buffer did not modify the original buffer. The implementation also handled self-assignment and `std::vector` reallocation without data corruption or double-free behavior.
+Changing the copied buffer did not change the original. I also tested self-assignment and `std::vector` reallocation.
 
-## `unique_ptr` Rewrite
+## `unique_ptr` Version
 
 I rewrote the buffer as `SmartBuffer` using:
 
@@ -90,35 +85,29 @@ I rewrote the buffer as `SmartBuffer` using:
 std::unique_ptr<double[]>
 ```
 
-This removes the need to manually call `delete[]` and removes the need for a custom destructor whose only purpose is releasing the buffer.
+With `unique_ptr`, I no longer need to manually call `delete[]` or write a destructor just for memory cleanup.
 
-The copy constructor and copy-assignment operator are still implemented because `std::unique_ptr` itself is non-copyable, while `SmartBuffer` is intended to preserve deep-copy behavior.
+I still kept the copy constructor and copy assignment because `unique_ptr` itself cannot be copied, but I still wanted `SmartBuffer` to support deep copy.
 
-The test produced:
+Result:
 
 ```text
 SmartBuffer deep copy: 10.5, 999
 ```
 
-This confirms that the copied `SmartBuffer` owns a separate array.
-
 ## RAII Timer
 
-`ScopedTimer` records the starting time when it is constructed and reports elapsed time from its destructor.
+I created a `ScopedTimer` that records the start time when it is created and prints the elapsed time in its destructor.
 
-One run produced:
+Result from one run:
 
 ```text
 RAII timer: 4.08737 ms
 ```
 
-Because the timing action is tied to the object's lifetime, the destructor is automatically called when the scope exits.
-
 ## Smart Pointer Benchmarks
 
-The benchmark was compiled with `-O2`.
-
-Results from one run:
+Results from one `-O2` run:
 
 | Operation | Time |
 |---|---:|
@@ -129,25 +118,23 @@ Results from one run:
 | `shared_ptr` dereference | 0.397334 ns/op |
 | `shared_ptr` copy | 13.4183 ns/op |
 
-The raw pointer, `unique_ptr`, and `shared_ptr` dereference measurements are all approximately the same. The small differences between them are measurement noise rather than meaningful ownership overhead.
+The three dereference results were very close, so there was not much difference between raw pointer, `unique_ptr`, and `shared_ptr` dereference.
 
-The main additional cost of `shared_ptr` appears when it is copied. Copying a `shared_ptr` does not copy the underlying object, but it updates the reference count in the shared control block. The increment and later decrement of this reference count are atomic operations, which adds overhead.
+The main extra cost came from copying a `shared_ptr`, since the reference count has to be updated atomically.
 
-`shared_ptr` creation was also more expensive than `unique_ptr` creation because shared ownership requires additional control-block state.
+`shared_ptr` creation was also a little slower than `unique_ptr` creation because it needs extra shared-ownership information.
 
-`unique_ptr` is move-only and cannot be copied because it represents exclusive ownership.
+## Benchmark Note
 
-## Benchmark Method
+My first `unique_ptr` creation result was around `0.3 ns/op`, which was clearly too low.
 
-My first `unique_ptr` creation benchmark produced an unrealistically low value of about `0.3 ns/op`. Under `-O2`, the compiler was able to optimize away the short-lived allocation.
+The compiler was optimizing away the short-lived allocation under `-O2`, so I changed the benchmark to keep the created smart pointers alive in pre-reserved vectors.
 
-I changed the creation benchmark so that the created smart pointers remain alive in pre-reserved vectors during the timed section. This prevented the allocations from being removed by the optimizer and produced the measurements reported above.
+After that, the results became more reasonable.
 
-## Pool Allocation and the Hot Path
+## Pool Allocation
 
-The hot-path example replaces repeated heap allocation with a pre-allocated pool slot.
-
-The basic pattern is:
+I also tested the idea of replacing heap allocation in a hot path with a pre-allocated pool slot.
 
 ```cpp
 void* slot = pool.alloc();
@@ -159,18 +146,22 @@ o->~Order();
 pool.free(slot);
 ```
 
-The test produced:
+Result:
 
 ```text
 Pool order: 100
 ```
 
-This pattern avoids calling `new` or `make_shared` for every event on the hot path. Heap allocation can involve allocator synchronization or page faults, which may happen only occasionally. Because of this, allocation can have a much larger effect on p99.9 tail latency than on median p50 latency.
+This avoids calling `new` or `make_shared` every time the hot path runs. This matters more for tail latency such as p99.9 because heap allocation can occasionally be much slower than usual.
 
 ## Summary
 
-The raw-pointer example shows how manual ownership can leak when control flow exits early. RAII ties resource lifetime to object lifetime and makes cleanup automatic.
+This homework showed the difference between manual memory management and RAII.
 
-For exclusive ownership, `std::unique_ptr` removes manual memory cleanup with essentially no dereference overhead. `std::shared_ptr` is useful when ownership is genuinely shared, but copying it has additional atomic reference-count cost.
+The raw-pointer version could leak when the function returned early, while `unique_ptr` and the custom RAII guard cleaned up automatically.
 
-In latency-sensitive code, unnecessary shared ownership and heap allocation should therefore be avoided on the hot path.
+For the buffer class, the Rule of Three was needed when using raw memory. After switching to `unique_ptr`, manual cleanup was no longer needed.
+
+The benchmark also showed that pointer dereference itself is cheap, while `shared_ptr` copying has extra cost because of reference counting.
+
+AddressSanitizer was also attempted on macOS, but the sanitizer runtime failed during initialization on my system. I therefore used macOS `leaks` for leak checking and separately tested the Rule-of-Three implementation with self-assignment and `std::vector` reallocation.
